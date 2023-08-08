@@ -205,7 +205,7 @@ namespace MsgKit.Structures
                         break;
 
                     case PropertyType.PT_OBJECT:
-                        // TODO: Adding new MSG file
+                        binaryWriter.Write(new byte[8] {0xFF, 0xFF, 0xFF, 0xFF, 0x01, 0x00, 0x00, 0x00});
                         break;
                 }
             }

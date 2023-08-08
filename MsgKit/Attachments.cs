@@ -166,6 +166,30 @@ namespace MsgKit
                 contentId));
         }
 
+        public void AddEmbeddedMsg(string fileName, 
+                        long renderingPosition = -1,
+                        bool isInline = false, 
+                        string contentId = "",
+                        string shownSubject = null)
+        {
+            if (Count >= 2048)
+                throw new MKAttachment("To many attachments, an msg file can have a maximum of 2048 attachment");
+
+            CheckAttachmentFileName(fileName, contentId);
+            var file = new FileInfo(fileName);
+            var stream = file.OpenRead();
+
+            Add(new Attachment(stream,
+                file.Name,
+                file.CreationTime,
+                file.LastWriteTime,
+                AttachmentType.ATTACH_EMBEDDED_MSG,
+                renderingPosition,
+                isInline,
+                contentId,
+                shownSubject: shownSubject));
+        }
+
         /// <summary>
         ///     Adds an <see cref="Attachment" /> stream by <see cref="AttachmentType.ATTACH_BY_VALUE" /> (default)
         /// </summary>
@@ -288,6 +312,11 @@ namespace MsgKit
         ///     The date and time when the attachment was last modified
         /// </summary>
         public DateTime LastModificationTime { get; }
+
+        /// <summary>
+        ///     The shown subject. Only available when attachment is an embedded msg.
+        /// </summary>
+        public string ShownSubject { get; set; }
         #endregion
 
         #region Constructor
@@ -315,7 +344,8 @@ namespace MsgKit
             long renderingPosition = -1,
             bool isInline = false,
             string contentId = "",
-            bool isContactPhoto = false)
+            bool isContactPhoto = false,
+            string shownSubject = null)
         {
             Stream = stream;
             FileName = Path.GetFileName(fileName);
@@ -326,6 +356,7 @@ namespace MsgKit
             IsInline = isInline;
             ContentId = contentId;
             IsContactPhoto = isContactPhoto;
+            ShownSubject = shownSubject;
 
             if (isInline && string.IsNullOrWhiteSpace(contentId))
                 throw new ArgumentNullException(nameof(contentId), "The content id cannot be empty when isInline is set to true");
@@ -349,7 +380,8 @@ namespace MsgKit
             long renderingPosition = -1,
             bool isInline = false,
             string contentId = "",
-            bool isContactPhoto = false)
+            bool isContactPhoto = false,
+            string shownSubject = null)
         {
             _file = file;
             Stream = file.OpenRead();
@@ -361,6 +393,7 @@ namespace MsgKit
             IsInline = isInline;
             ContentId = contentId;
             IsContactPhoto = isContactPhoto;
+            ShownSubject = shownSubject;
 
             if (isInline && string.IsNullOrWhiteSpace(contentId))
                 throw new ArgumentNullException(nameof(contentId), "The content id cannot be empty when isInline is set to true");
@@ -408,11 +441,11 @@ namespace MsgKit
             propertiesStream.AddProperty(PropertyTags.PR_RECORD_KEY, Mapi.GenerateRecordKey(), PropertyFlags.PROPATTR_READABLE);
             propertiesStream.AddProperty(PropertyTags.PR_RENDERING_POSITION, RenderingPosition, PropertyFlags.PROPATTR_READABLE);
             propertiesStream.AddProperty(PropertyTags.PR_OBJECT_TYPE, MapiObjectType.MAPI_ATTACH);
-            
+
             if (IsContactPhoto)
                 propertiesStream.AddProperty(PropertyTags.PR_ATTACHMENT_CONTACTPHOTO, true, PropertyFlags.PROPATTR_READABLE);
                 
-            if (!string.IsNullOrEmpty(FileName))
+            if (!string.IsNullOrEmpty(FileName) && Type != AttachmentType.ATTACH_EMBEDDED_MSG)
             {
                 propertiesStream.AddProperty(PropertyTags.PR_DISPLAY_NAME_W, FileName);
                 propertiesStream.AddProperty(PropertyTags.PR_ATTACH_FILENAME_W, GetShortFileName(FileName));
@@ -430,7 +463,7 @@ namespace MsgKit
             switch (Type)
             {
                 case AttachmentType.ATTACH_BY_VALUE:
-                case AttachmentType.ATTACH_EMBEDDED_MSG:
+                // case AttachmentType.ATTACH_EMBEDDED_MSG:
                     propertiesStream.AddProperty(PropertyTags.PR_ATTACH_DATA_BIN, Stream.ToByteArray());
                     propertiesStream.AddProperty(PropertyTags.PR_ATTACH_SIZE, Stream.Length);
                     break;
@@ -441,13 +474,22 @@ namespace MsgKit
                     propertiesStream.AddProperty(PropertyTags.PR_ATTACH_LONG_PATHNAME_W, _file.FullName);
                     break;
 
-                //case AttachmentType.ATTACH_EMBEDDED_MSG:
-                //    var msgStorage = storage.AddStorage(PropertyTags.PR_ATTACH_DATA_BIN.Name);
-                //    var cf = new CompoundFile(Stream);
-                //    Storage.Copy(cf.RootStorage, msgStorage);
-                //    propertiesStream.AddProperty(PropertyTags.PR_ATTACH_SIZE, Stream.Length);
-                //    propertiesStream.AddProperty(PropertyTags.PR_ATTACH_ENCODING, 0);
-                //    break;
+                case AttachmentType.ATTACH_EMBEDDED_MSG:
+                    var cf = new CompoundFile(Stream, CFSUpdateMode.Update, CFSConfiguration.Default);
+                    if (cf.RootStorage.TryGetStream(PropertyTags.PropertiesStreamName, out var propsStream))
+                    {
+                        var bytes = propsStream.GetData();
+                        bytes = bytes.Take(0x18).Concat(bytes.Skip(0x20)).ToArray();
+                        propsStream.SetData(bytes);
+                    }
+
+                    if (ShownSubject is string)
+                        propertiesStream.AddProperty(PropertyTags.PR_DISPLAY_NAME_W, ShownSubject);
+
+                    var msgStorage = storage.AddStorage(PropertyTags.PR_ATTACH_DATA_OBJ.Name);
+                    Storage.Copy(cf.RootStorage, msgStorage);
+                    propertiesStream.AddProperty(PropertyTags.PR_ATTACH_DATA_OBJ, 1);
+                    break;
 
                 case AttachmentType.ATTACH_BY_REFERENCE:
                 case AttachmentType.ATTACH_BY_REF_RESOLVE:
