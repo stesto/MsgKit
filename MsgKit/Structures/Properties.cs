@@ -205,7 +205,13 @@ namespace MsgKit.Structures
                         break;
 
                     case PropertyType.PT_OBJECT:
-                        binaryWriter.Write(new byte[8] {0xFF, 0xFF, 0xFF, 0xFF, 0x01, 0x00, 0x00, 0x00});
+                        /*
+                            According to the spec (MS-OXMSG - 2.4.2.2) the size field must be set to 0xFFFFFFFF.
+                            The next 4 bytes are "Reserved" and must be set to 0x01 if the attachment is
+                            an embedded message.
+                        */
+                        binaryWriter.Write(new byte[] { 0xFF, 0xFF, 0xFF, 0xFF }); // MS-OXMSG 2.4.2.2
+                        binaryWriter.Write(property.Data);
                         break;
                 }
             }
@@ -533,8 +539,13 @@ namespace MsgKit.Structures
                 case PropertyType.PT_UNSPECIFIED:
                     throw new NotSupportedException("PT_UNSPECIFIED property type is not supported");
 
-                case PropertyType.PT_OBJECT:
-                    // TODO: Add support for MSG
+                case PropertyType.PT_OBJECT: // MS-OXMSG 2.4.2.2
+                    if (obj is AttachmentType.ATTACH_EMBEDDED_MSG)
+                        data = BitConverter.GetBytes(0x01);
+                    else if (obj is AttachmentType.ATTACH_OLE)
+                        data = BitConverter.GetBytes(0x04);
+                    else
+                        throw new NotSupportedException("this AttachmentType is not supported");
                     break;
 
                 case PropertyType.PT_SVREID:

@@ -478,6 +478,17 @@ namespace MsgKit
                     var cf = new CompoundFile(Stream, CFSUpdateMode.Update, CFSConfiguration.Default);
                     if (cf.RootStorage.TryGetStream(PropertyTags.PropertiesStreamName, out var propsStream))
                     {
+                        /*
+                            At this point the message to attach has a property stream whose header is structured 
+                            as a "top level" header (MS-OXMSG - 2.4.1.1). But according to the spec, when a
+                            message becomes an "embedded message", the header of the property stream MUST
+                            be structered as an "embedded message object storage" (MS-OXMSG - 2.4.1.2).
+                            At the time of writing the only difference between these two structures is
+                            the "Reserved" field at the end of the top level header. The header of the embedded message does not include that.
+                            So in order to "convert" the top level structure to an embedded message structure
+                            in a hacky way without the need to properly parse and re-build it, we just remove the "Reserved" field.
+                            This field has an offset of 0x18 and a length of 8 bytes.  
+                        */
                         var bytes = propsStream.GetData();
                         bytes = bytes.Take(0x18).Concat(bytes.Skip(0x20)).ToArray();
                         propsStream.SetData(bytes);
@@ -488,7 +499,7 @@ namespace MsgKit
 
                     var msgStorage = storage.AddStorage(PropertyTags.PR_ATTACH_DATA_OBJ.Name);
                     Storage.Copy(cf.RootStorage, msgStorage);
-                    propertiesStream.AddProperty(PropertyTags.PR_ATTACH_DATA_OBJ, 1);
+                    propertiesStream.AddProperty(PropertyTags.PR_ATTACH_DATA_OBJ, AttachmentType.ATTACH_EMBEDDED_MSG);
                     break;
 
                 case AttachmentType.ATTACH_BY_REFERENCE:
